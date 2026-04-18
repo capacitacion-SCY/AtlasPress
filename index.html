@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atlas Press Argentina</title>
+  <meta name="description" content="Portal editorial moderno con portada dinamica y administracion web.">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="home">
+  <div class="site-shell">
+    <header class="topbar">
+      <div class="topbar__meta">
+        <span id="currentDate"></span>
+        <a href="admin.html">Acceso editorial</a>
+      </div>
+      <div class="brand-row">
+        <div>
+          <p class="eyebrow">Prensa Digital</p>
+          <div class="brand-line">
+            <a class="brand" href="index.html">
+              <span class="brand__main">Atlas Press</span>
+              <span class="brand__sub">Argentina</span>
+            </a>
+            <p class="brand-copy">Noticias, analisis y cultura con una portada flexible para destacar lo importante.</p>
+          </div>
+        </div>
+      </div>
+      <nav class="section-nav" id="sectionNav"></nav>
+    </header>
+
+    <main class="layout">
+      <section class="newsroom-grid">
+        <aside class="news-column news-column--left">
+          <div class="section-heading section-heading--compact">
+            <div>
+              <p class="eyebrow">Cobertura breve</p>
+              <h2>Ultimas noticias</h2>
+            </div>
+          </div>
+          <div id="leftColumn"></div>
+        </aside>
+
+        <section class="news-column news-column--center">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Destacadas</p>
+              <h2>Historias principales</h2>
+            </div>
+          </div>
+          <div id="centerColumn"></div>
+        </section>
+
+        <aside class="news-column news-column--right">
+          <div class="section-heading section-heading--compact">
+            <div>
+              <p class="eyebrow">Agenda y publicidad</p>
+              <h2>Mas para leer</h2>
+            </div>
+          </div>
+          <div id="rightColumn"></div>
+        </aside>
+      </section>
+    </main>
+
+    <section class="impact-strip" id="impactStrip"></section>
+
+    <footer class="site-footer">
+      <div>
+        <p class="eyebrow">Atlas Press Argentina</p>
+        <p>Portada estilo newsroom con edicion web y login para el equipo editorial.</p>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Inicio</a>
+        <a href="admin.html">Panel admin</a>
+      </div>
+    </footer>
+  </div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
