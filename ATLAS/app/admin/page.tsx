@@ -28,6 +28,16 @@ const permissions = [
   { key: "users", label: "Usuarios" }
 ];
 
+const feedbackMessages: Record<string, string> = {
+  "backup-vacio": "Selecciona un archivo JSON o pega el contenido del backup.",
+  "backup-json": "El archivo no parece ser un JSON válido de Atlas.",
+  "backup-categorias": "No se pudieron importar las categorías. Revisa permisos de ajustes.",
+  "backup-notas": "No se pudieron importar las notas. Revisa permisos y formato del backup.",
+  "backup-publicidad": "Las notas se procesaron, pero falló la publicidad. Revisa permisos de publicidad.",
+  "backup-impacto": "Las notas se procesaron, pero falló la franja de impacto. Revisa permisos de impacto.",
+  "backup-ajustes": "Las notas se procesaron, pero fallaron los ajustes del sitio."
+};
+
 function can(profile: Profile, permission: string) {
   return profile.role === "admin" || profile.permissions.includes(permission);
 }
@@ -148,7 +158,7 @@ export default async function AdminPage({
 
         {(params.ok || params.error) && (
           <p className="publish-feedback">
-            {params.ok ? "Cambios guardados correctamente." : "No se pudo completar la acción. Revisa permisos o datos requeridos."}
+            {params.ok ? "Cambios guardados correctamente." : feedbackMessages[params.error ?? ""] ?? "No se pudo completar la acción. Revisa permisos o datos requeridos."}
           </p>
         )}
 

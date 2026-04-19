@@ -372,8 +372,11 @@ export async function importBackup(formData: FormData) {
   }
 
   let backup: {
+    settings?: Array<Record<string, unknown>>;
     categories?: Array<{ name: string; slug: string; sort_order?: number }>;
     stories?: Array<Record<string, unknown>>;
+    ads?: Array<Record<string, unknown>>;
+    impact_cards?: Array<Record<string, unknown>>;
   };
 
   try {
@@ -384,7 +387,7 @@ export async function importBackup(formData: FormData) {
 
   const categories = Array.isArray(backup.categories) ? backup.categories : [];
   if (categories.length > 0) {
-    await supabase.from("categories").upsert(
+    const { error } = await supabase.from("categories").upsert(
       categories.map((category, index) => ({
         name: String(category.name || category.slug || `Categoria ${index + 1}`),
         slug: slugify(String(category.slug || category.name || `categoria-${index + 1}`)),
@@ -392,17 +395,27 @@ export async function importBackup(formData: FormData) {
       })),
       { onConflict: "slug" }
     );
+
+    if (error) {
+      redirect("/admin?error=backup-categorias#importar-exportar");
+    }
   }
 
-  const { data: currentCategories } = await supabase.from("categories").select("id, slug");
+  const { data: currentCategories, error: categoriesError } = await supabase.from("categories").select("id, slug");
+  if (categoriesError) {
+    redirect("/admin?error=backup-categorias#importar-exportar");
+  }
+
   const categoryIds = new Map((currentCategories ?? []).map((category) => [category.slug, category.id]));
   const stories = Array.isArray(backup.stories) ? backup.stories : [];
 
   if (stories.length > 0) {
-    await supabase.from("stories").upsert(
+    const { error } = await supabase.from("stories").upsert(
       stories.map((story, index) => {
         const title = String(story.title || `Nota importada ${index + 1}`);
         const categorySlug = String(story.category_slug || story.category || "");
+        const status = String(story.status || "published");
+        const textPosition = String(story.featured_text_position || "auto");
 
         return {
           title,
@@ -416,14 +429,73 @@ export async function importBackup(formData: FormData) {
           video_url: String(story.video_url || ""),
           featured: Boolean(story.featured),
           editors_pick: Boolean(story.editors_pick),
+          featured_order: story.featured_order === null || story.featured_order === undefined ? null : Number(story.featured_order),
+          featured_text_position: ["auto", "left", "right"].includes(textPosition) ? textPosition : "auto",
           source_label: String(story.source_label || ""),
           source_url: String(story.source_url || ""),
-          status: String(story.status || "published"),
+          status: ["draft", "published", "archived"].includes(status) ? status : "published",
           published_at: story.published_at ? new Date(String(story.published_at)).toISOString() : new Date().toISOString()
         };
       }),
       { onConflict: "slug" }
     );
+
+    if (error) {
+      redirect("/admin?error=backup-notas#importar-exportar");
+    }
+  }
+
+  const ads = Array.isArray(backup.ads) ? backup.ads : [];
+  if (ads.length > 0) {
+    const { error } = await supabase.from("ads").insert(
+      ads.map((ad) => ({
+        label: String(ad.label || "Publicidad"),
+        title: String(ad.title || "Publicidad importada"),
+        description: String(ad.description || ""),
+        image_url: String(ad.image_url || ""),
+        url: String(ad.url || ""),
+        active: Boolean(ad.active)
+      }))
+    );
+
+    if (error) {
+      redirect("/admin?error=backup-publicidad#importar-exportar");
+    }
+  }
+
+  const impactCards = Array.isArray(backup.impact_cards) ? backup.impact_cards : [];
+  if (impactCards.length > 0) {
+    const { error } = await supabase.from("impact_cards").upsert(
+      impactCards.map((card, index) => ({
+        label: String(card.label || ""),
+        title: String(card.title || `Bloque importado ${index + 1}`),
+        body: String(card.body || ""),
+        sort_order: Number(card.sort_order ?? (index + 1) * 10)
+      })),
+      { onConflict: "id" }
+    );
+
+    if (error) {
+      redirect("/admin?error=backup-impacto#importar-exportar");
+    }
+  }
+
+  const settings = Array.isArray(backup.settings) ? backup.settings : [];
+  if (settings.length > 0) {
+    const [firstSetting] = settings;
+    const { data: currentSettings } = await supabase.from("site_settings").select("id").limit(1).maybeSingle();
+    const payload = {
+      site_name: String(firstSetting.site_name || "Atlas Press Argentina"),
+      tagline: String(firstSetting.tagline || ""),
+      impact_background_image: String(firstSetting.impact_background_image || "")
+    };
+    const { error } = currentSettings?.id
+      ? await supabase.from("site_settings").update(payload).eq("id", currentSettings.id)
+      : await supabase.from("site_settings").insert(payload);
+
+    if (error) {
+      redirect("/admin?error=backup-ajustes#importar-exportar");
+    }
   }
 
   revalidatePath("/");
