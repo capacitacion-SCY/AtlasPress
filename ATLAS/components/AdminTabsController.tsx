@@ -13,9 +13,16 @@ const tabIds = [
   "equipo-editorial"
 ];
 
+const storageKey = "atlas-admin-active-tab";
+
 function getActiveTabId() {
   const hash = window.location.hash.replace("#", "");
-  return tabIds.includes(hash) ? hash : "ajustes-rapidos";
+  if (tabIds.includes(hash)) return hash;
+
+  const storedTab = window.sessionStorage.getItem(storageKey);
+  if (storedTab && tabIds.includes(storedTab)) return storedTab;
+
+  return "ajustes-rapidos";
 }
 
 export function AdminTabsController() {
@@ -30,6 +37,7 @@ export function AdminTabsController() {
       const activeId = getActiveTabId();
 
       panel?.classList.add("admin-panel--tabs-ready");
+      window.sessionStorage.setItem(storageKey, activeId);
 
       sections.forEach((section) => {
         const isActive = section.id === activeId;
@@ -43,17 +51,30 @@ export function AdminTabsController() {
     }
 
     activateTab();
+    window.requestAnimationFrame(activateTab);
+    window.setTimeout(activateTab, 80);
     window.addEventListener("hashchange", activateTab);
 
     tabs.forEach((tab) => {
-      tab.addEventListener("click", activateTab);
+      tab.addEventListener("click", () => {
+        const tabId = tab.getAttribute("href")?.replace("#", "");
+        if (tabId && tabIds.includes(tabId)) {
+          window.sessionStorage.setItem(storageKey, tabId);
+        }
+        window.requestAnimationFrame(activateTab);
+      });
+    });
+
+    sections.forEach((section) => {
+      section.querySelectorAll("form").forEach((form) => {
+        form.addEventListener("submit", () => {
+          window.sessionStorage.setItem(storageKey, section.id);
+        });
+      });
     });
 
     return () => {
       window.removeEventListener("hashchange", activateTab);
-      tabs.forEach((tab) => {
-        tab.removeEventListener("click", activateTab);
-      });
     };
   }, []);
 

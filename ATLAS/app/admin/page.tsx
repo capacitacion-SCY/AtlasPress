@@ -366,9 +366,14 @@ export default async function AdminPage({
               <p className="admin-copy">Descarga un JSON con notas, categorías, publicidad, ajustes y franja de impacto.</p>
               <a className="button button--primary" href="/admin/export">Descargar backup</a>
             </div>
-            <form action={importBackup} className="import-export-card">
+            <form action={importBackup} className="import-export-card" encType="multipart/form-data">
               <h3>Importar publicaciones</h3>
-              <p className="admin-copy">Pega aquí un JSON exportado desde Atlas. Las notas se actualizan por slug para evitar duplicados.</p>
+              <p className="admin-copy">Sube un backup JSON exportado desde Atlas, o pega el contenido manualmente. Las notas se actualizan por slug para evitar duplicados.</p>
+              <label className="backup-upload-card">
+                <span className="backup-upload-card__title">Seleccionar archivo de backup</span>
+                <span className="backup-upload-card__copy">Formato permitido: .json</span>
+                <input type="file" name="backup_file" accept="application/json,.json" disabled={!can(profile, "stories")} />
+              </label>
               <textarea name="backup_json" placeholder='{"categories":[],"stories":[]}' />
               <button className="button" type="submit" disabled={!can(profile, "stories")}>Importar contenido</button>
             </form>

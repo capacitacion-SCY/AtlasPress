@@ -356,7 +356,16 @@ export async function syncEditorialUsers() {
 
 export async function importBackup(formData: FormData) {
   const { supabase, user, profile } = await requirePermission("stories");
-  const rawBackup = value(formData, "backup_json");
+  let rawBackup = value(formData, "backup_json");
+  const backupFile = formData.get("backup_file");
+
+  if (!rawBackup && backupFile instanceof File && backupFile.size > 0) {
+    if (!backupFile.name.toLowerCase().endsWith(".json")) {
+      redirect("/admin?error=backup-json#importar-exportar");
+    }
+
+    rawBackup = await backupFile.text();
+  }
 
   if (!rawBackup) {
     redirect("/admin?error=backup-vacio#importar-exportar");

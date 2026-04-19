@@ -26,7 +26,7 @@ http://localhost:3000
 http://localhost:3000/admin
 ```
 
-No usar Live Server ni abrir `index.html` / `admin.html` directamente. Esos archivos solo existen como puentes para evitar confusion; el sitio real corre con Next.js.
+No usar Live Server ni abrir archivos HTML directamente. El sitio real corre con Next.js y se ve desde el servidor local o desde Vercel.
 
 ## Publicacion
 

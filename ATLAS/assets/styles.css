@@ -73,7 +73,7 @@
     --muted: #aeb8c7;
     --line: rgba(198, 207, 220, 0.12);
     --accent: #d8b36f;
-    --eyebrow-color: #ffeec2;
+    --eyebrow-color: #FEFFDB;
     --read-more-color: var(--accent);
     --forest: #8fa7c6;
     --sky: #102039;
@@ -2439,6 +2439,33 @@ textarea {
 
 .import-export-card .admin-copy {
   margin: 0;
+}
+
+.backup-upload-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 20px;
+  background: var(--surface-soft);
+}
+
+.backup-upload-card__title {
+  color: var(--ink);
+  font-family: var(--font-meta);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.backup-upload-card__copy {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.backup-upload-card input[type="file"] {
+  width: 100%;
 }
 
 .import-preview {

@@ -20,6 +20,8 @@ En este proyecto esa carpeta es:
 ATLAS
 ```
 
+Si en GitHub la carpeta se llama `Atlas`, usa exactamente `Atlas`. Si se llama `ATLAS`, usa exactamente `ATLAS`.
+
 ## Si tu repositorio tiene una carpeta ATLAS adentro
 
 En Vercel:
@@ -65,7 +67,7 @@ Application error: a server-side exception has occurred
 
 revisa primero estas dos cosas:
 
-1. Que `Root Directory` sea `ATLAS` si el repositorio contiene la carpeta `ATLAS`.
+1. Que `Root Directory` sea el nombre exacto de la carpeta del proyecto (`Atlas` o `ATLAS`).
 2. Que las variables de entorno existan en Vercel para `Production`, `Preview` y `Development`.
 
 Los nombres deben ser exactamente:
@@ -73,6 +75,19 @@ Los nombres deben ser exactamente:
 ```text
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+SUPABASE_SERVICE_ROLE_KEY
 ```
 
 Despues de agregarlas o corregirlas, haz un redeploy. Vercel no siempre aplica variables nuevas al deploy anterior.
+
+## Imagenes no suben
+
+Si el admin falla al subir imagenes, verifica que exista el bucket publico `atlas-media` en Supabase.
+
+En Supabase, abre `SQL Editor` y ejecuta:
+
+```text
+supabase/storage-policies.sql
+```
+
+Ese script crea el bucket si falta y configura las politicas de lectura/subida.
