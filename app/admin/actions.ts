@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { slugify } from "@/lib/format";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
@@ -38,6 +39,15 @@ function value(formData: FormData, key: string) {
 
 function checkbox(formData: FormData, key: string) {
   return formData.get(key) === "on";
+}
+
+function selectedPermissions(formData: FormData) {
+  return ["stories", "ads", "impact", "settings", "users"].filter((permission) => formData.get(permission) === "on");
+}
+
+function profileRole(formData: FormData) {
+  const role = value(formData, "role");
+  return ["admin", "editor", "redactor", "publicidad", "revisor"].includes(role) ? role : "redactor";
 }
 
 async function uploadImageFromForm(
@@ -208,20 +218,140 @@ export async function updateImpactCard(formData: FormData) {
 export async function updateProfilePermissions(formData: FormData) {
   const { supabase } = await requirePermission("users");
   const id = value(formData, "id");
-  const permissions = ["stories", "ads", "impact", "settings", "users"].filter((permission) => formData.get(permission) === "on");
+  const permissions = selectedPermissions(formData);
+  const newPassword = value(formData, "new_password");
 
   await supabase
     .from("profiles")
     .update({
       display_name: value(formData, "display_name"),
-      role: value(formData, "role"),
+      role: profileRole(formData),
       active: checkbox(formData, "active"),
       permissions
     })
     .eq("id", id);
 
+  if (newPassword) {
+    if (newPassword.length < 8) {
+      redirect("/admin?error=password-corta#equipo-editorial");
+    }
+
+    let admin;
+    try {
+      admin = createAdminClient();
+    } catch {
+      redirect("/admin?error=service-role#equipo-editorial");
+    }
+
+    const { error } = await admin.auth.admin.updateUserById(id, { password: newPassword });
+    if (error) {
+      redirect("/admin?error=password#equipo-editorial");
+    }
+  }
+
   revalidatePath("/admin");
   redirect("/admin?ok=usuario#equipo-editorial");
+}
+
+export async function createEditorialUser(formData: FormData) {
+  await requirePermission("users");
+
+  const email = value(formData, "email").toLowerCase();
+  const password = value(formData, "password");
+  const displayName = value(formData, "display_name") || email.split("@")[0];
+  const role = profileRole(formData);
+  const permissions = selectedPermissions(formData);
+  const active = checkbox(formData, "active");
+
+  if (!email || !password) {
+    redirect("/admin?error=usuario-incompleto#equipo-editorial");
+  }
+
+  if (password.length < 8) {
+    redirect("/admin?error=password-corta#equipo-editorial");
+  }
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    redirect("/admin?error=service-role#equipo-editorial");
+  }
+
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      display_name: displayName,
+      role,
+      permissions: permissions.join(",")
+    }
+  });
+
+  if (error || !data.user) {
+    redirect("/admin?error=crear-usuario#equipo-editorial");
+  }
+
+  const { error: profileError } = await admin.from("profiles").upsert({
+    id: data.user.id,
+    email,
+    display_name: displayName,
+    role,
+    permissions,
+    active
+  });
+
+  if (profileError) {
+    redirect("/admin?error=perfil-usuario#equipo-editorial");
+  }
+
+  revalidatePath("/admin");
+  redirect("/admin?ok=usuario-creado#equipo-editorial");
+}
+
+export async function syncEditorialUsers() {
+  await requirePermission("users");
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    redirect("/admin?error=service-role#equipo-editorial");
+  }
+
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) {
+    redirect("/admin?error=sincronizar-usuarios#equipo-editorial");
+  }
+
+  const { data: existingProfiles, error: profilesError } = await admin.from("profiles").select("id");
+  if (profilesError) {
+    redirect("/admin?error=sincronizar-usuarios#equipo-editorial");
+  }
+
+  const existingIds = new Set((existingProfiles ?? []).map((item) => item.id));
+  const missingUsers = data.users.filter((authUser) => Boolean(authUser.email) && !existingIds.has(authUser.id));
+
+  if (missingUsers.length > 0) {
+    const { error: insertError } = await admin.from("profiles").insert(
+      missingUsers.map((authUser) => ({
+        id: authUser.id,
+        email: authUser.email ?? "",
+        display_name: String(authUser.user_metadata?.display_name || authUser.email?.split("@")[0] || "Usuario"),
+        role: "redactor",
+        permissions: ["stories"],
+        active: true
+      }))
+    );
+
+    if (insertError) {
+      redirect("/admin?error=sincronizar-usuarios#equipo-editorial");
+    }
+  }
+
+  revalidatePath("/admin");
+  redirect("/admin?ok=usuarios-sincronizados#equipo-editorial");
 }
 
 export async function importBackup(formData: FormData) {

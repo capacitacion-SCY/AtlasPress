@@ -45,6 +45,14 @@ NEXT_PUBLIC_SUPABASE_URL=https://ckzsjybjmpwedvpbfonk.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_DOaJFL5OBfgYTjurMgaY3A_3w4khjat
 ```
 
+Para crear usuarios, cambiar contrasenas y sincronizar el equipo editorial desde el admin de Atlas, agrega tambien esta variable solo en Vercel:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_de_supabase
+```
+
+Esa clave se obtiene en Supabase en `Project Settings > API`. Es una clave privada de servidor: no debe empezar con `NEXT_PUBLIC_`, no debe ir en el navegador y no debe subirse a GitHub.
+
 No subas `.env.local` a GitHub.
 
 ## Error: Application error

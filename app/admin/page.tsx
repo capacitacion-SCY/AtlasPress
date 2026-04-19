@@ -1,9 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/login/actions";
-import { createAd, createStory, deleteStory, importBackup, updateImpactCard, updateProfilePermissions, updateSettings } from "./actions";
+import { AdminTabsController } from "@/components/AdminTabsController";
+import {
+  createAd,
+  createEditorialUser,
+  createStory,
+  deleteStory,
+  importBackup,
+  syncEditorialUsers,
+  updateImpactCard,
+  updateProfilePermissions,
+  updateSettings
+} from "./actions";
 import { getActiveAds, getCategories, getImpactCards, getPublishedStories, getSiteSettings } from "@/lib/content";
 import { formatDate } from "@/lib/format";
+import { hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { Ad, Profile, Story } from "@/lib/types";
@@ -107,6 +119,9 @@ export default async function AdminPage({
     can(profile, "users") ? supabase.from("profiles").select("*").order("created_at", { ascending: false }).returns<Profile[]>() : Promise.resolve({ data: [] })
   ]);
   const profiles = profilesResult.data ?? [];
+  const activeProfiles = profiles.filter((member) => member.active);
+  const inactiveProfiles = profiles.length - activeProfiles.length;
+  const canUseAdminUsers = hasSupabaseAdminEnv();
 
   return (
     <div className="admin-shell">
@@ -147,6 +162,7 @@ export default async function AdminPage({
           <a className="admin-tab" href="#importar-exportar">Importar / Exportar</a>
           <a className="admin-tab" href="#equipo-editorial">Equipo editorial</a>
         </nav>
+        <AdminTabsController />
 
         <section id="ajustes-rapidos" className="editor-card admin-card-panel">
           <div className="dashboard-header">
@@ -365,17 +381,71 @@ export default async function AdminPage({
               <p className="eyebrow">Seguridad</p>
               <h2>Equipo editorial</h2>
             </div>
+            {can(profile, "users") && <span className="inline-badge inline-badge--forest">{profiles.length} usuarios</span>}
           </div>
           {can(profile, "users") ? (
-            <div className="stories-table">
-              {profiles.map((member) => (
-                <form action={updateProfilePermissions} className="user-form" key={member.id}>
-                  <input type="hidden" name="id" value={member.id} />
-                  <label><span>Nombre visible</span><input name="display_name" defaultValue={member.display_name} /></label>
-                  <label><span>Email</span><input value={member.email} readOnly /></label>
+            <div className="editorial-team">
+              <div className="editorial-team__summary">
+                <article>
+                  <span>Total</span>
+                  <strong>{profiles.length}</strong>
+                  <small>perfiles editoriales</small>
+                </article>
+                <article>
+                  <span>Activos</span>
+                  <strong>{activeProfiles.length}</strong>
+                  <small>pueden ingresar</small>
+                </article>
+                <article>
+                  <span>Inactivos</span>
+                  <strong>{inactiveProfiles}</strong>
+                  <small>acceso pausado</small>
+                </article>
+              </div>
+
+              <div className="editorial-team__help">
+                <div>
+                  <p className="eyebrow">Administracion de accesos</p>
+                  <h3>Crear y ordenar el equipo</h3>
+                  <p className="admin-copy">
+                    Desde aqui puedes crear usuarios, activar o pausar accesos, cambiar contrasenas y limitar cada cuenta por seccion.
+                  </p>
+                </div>
+                <form action={syncEditorialUsers}>
+                  <button className="button button--ghost" type="submit" disabled={!canUseAdminUsers}>
+                    Sincronizar usuarios
+                  </button>
+                </form>
+              </div>
+
+              {!canUseAdminUsers && (
+                <div className="service-role-warning">
+                  <strong>Falta activar la administracion completa.</strong>
+                  <p>
+                    Para crear usuarios, cambiar contrasenas y sincronizar la lista desde Atlas, agrega
+                    <code>SUPABASE_SERVICE_ROLE_KEY</code> en las variables de entorno de Vercel. No la subas a GitHub.
+                  </p>
+                  <a className="button button--ghost" href="https://supabase.com/dashboard/project/ckzsjybjmpwedvpbfonk/auth/users" target="_blank" rel="noreferrer">
+                    Abrir Supabase Auth
+                  </a>
+                </div>
+              )}
+
+              <form action={createEditorialUser} className="editorial-user-create">
+                <div>
+                  <p className="eyebrow">Nuevo usuario</p>
+                  <h3>Agregar integrante editorial</h3>
+                  <p className="admin-copy">Crea el acceso y define desde el inicio que partes del sitio puede administrar.</p>
+                </div>
+                <div className="form-split">
+                  <label><span>Email de acceso</span><input type="email" name="email" placeholder="usuario@dominio.com" required disabled={!canUseAdminUsers} /></label>
+                  <label><span>Nombre visible</span><input name="display_name" placeholder="Nombre y apellido" disabled={!canUseAdminUsers} /></label>
+                </div>
+                <div className="form-split">
+                  <label><span>Contrasena inicial</span><input type="password" name="password" minLength={8} placeholder="Minimo 8 caracteres" required disabled={!canUseAdminUsers} /></label>
                   <label>
                     <span>Rol</span>
-                    <select name="role" defaultValue={member.role}>
+                    <select name="role" defaultValue="redactor" disabled={!canUseAdminUsers}>
                       <option value="admin">Admin</option>
                       <option value="editor">Editor</option>
                       <option value="redactor">Redactor</option>
@@ -383,18 +453,66 @@ export default async function AdminPage({
                       <option value="revisor">Revisor</option>
                     </select>
                   </label>
-                  <div className="permissions-grid">
-                    {permissions.map((permission) => (
-                      <label className="checkbox checkbox--stacked" key={permission.key}>
-                        <input type="checkbox" name={permission.key} defaultChecked={member.permissions.includes(permission.key)} />
-                        <span>{permission.label}</span>
+                </div>
+                <div className="permissions-grid">
+                  {permissions.map((permission) => (
+                    <label className="checkbox checkbox--stacked" key={permission.key}>
+                      <input type="checkbox" name={permission.key} defaultChecked={permission.key === "stories"} disabled={!canUseAdminUsers} />
+                      <span>{permission.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="dashboard-actions">
+                  <label className="checkbox"><input type="checkbox" name="active" defaultChecked disabled={!canUseAdminUsers} /><span>Usuario activo</span></label>
+                  <button className="button button--primary" type="submit" disabled={!canUseAdminUsers}>Crear usuario</button>
+                </div>
+              </form>
+
+              <div className="stories-table">
+                {profiles.length === 0 && <p className="empty-state">Todavia no hay perfiles editoriales para administrar.</p>}
+                {profiles.map((member) => (
+                  <form action={updateProfilePermissions} className="user-form editorial-user-card" key={member.id}>
+                    <input type="hidden" name="id" value={member.id} />
+                    <div className="editorial-user-card__header">
+                      <div>
+                        <p className="eyebrow">{member.active ? "Usuario activo" : "Usuario inactivo"}</p>
+                        <h3>{member.display_name || member.email}</h3>
+                        <span>{member.email}</span>
+                      </div>
+                      <span className="inline-badge">{member.role}</span>
+                    </div>
+                    <div className="form-split">
+                      <label><span>Nombre visible</span><input name="display_name" defaultValue={member.display_name} /></label>
+                      <label>
+                        <span>Rol</span>
+                        <select name="role" defaultValue={member.role}>
+                          <option value="admin">Admin</option>
+                          <option value="editor">Editor</option>
+                          <option value="redactor">Redactor</option>
+                          <option value="publicidad">Publicidad</option>
+                          <option value="revisor">Revisor</option>
+                        </select>
                       </label>
-                    ))}
-                  </div>
-                  <label className="checkbox"><input type="checkbox" name="active" defaultChecked={member.active} /><span>Usuario activo</span></label>
-                  <button className="button" type="submit">Guardar usuario</button>
-                </form>
-              ))}
+                    </div>
+                    <label>
+                      <span>Nueva contrasena</span>
+                      <input type="password" name="new_password" minLength={8} placeholder="Dejar vacio para no cambiarla" disabled={!canUseAdminUsers} />
+                    </label>
+                    <div className="permissions-grid">
+                      {permissions.map((permission) => (
+                        <label className="checkbox checkbox--stacked" key={permission.key}>
+                          <input type="checkbox" name={permission.key} defaultChecked={member.permissions.includes(permission.key)} />
+                          <span>{permission.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="dashboard-actions">
+                      <label className="checkbox"><input type="checkbox" name="active" defaultChecked={member.active} /><span>Usuario activo</span></label>
+                      <button className="button" type="submit">Guardar usuario</button>
+                    </div>
+                  </form>
+                ))}
+              </div>
             </div>
           ) : (
             <p className="empty-state">Tu usuario no tiene permiso para administrar el equipo editorial.</p>

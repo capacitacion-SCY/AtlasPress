@@ -11,6 +11,7 @@
 .story-admin-form {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .story-admin-form textarea {
@@ -32,9 +33,57 @@
   text-decoration: none;
 }
 
+.admin-shell,
+.admin-panel,
+.admin-card-panel,
+.editor-card,
+.story-admin-form,
+.stories-table,
+.user-form,
+.import-export-card,
+.form-section,
+.form-split,
+.dashboard-header,
+.admin-hero {
+  min-width: 0;
+}
+
+.admin-panel {
+  overflow-x: clip;
+}
+
+.admin-card-panel * {
+  max-width: 100%;
+}
+
+.story-library-row__content,
+.ad-admin-card__body,
+.admin-copy,
+.field-hint,
+label,
+input,
+textarea,
+select {
+  min-width: 0;
+}
+
+.story-library-row__content,
+.ad-admin-card__body,
+.admin-copy,
+.field-hint {
+  overflow-wrap: anywhere;
+}
+
 .admin-card-panel {
   scroll-margin-top: 20px;
-  margin-top: 18px;
+}
+
+.admin-panel--tabs-ready .admin-card-panel[hidden] {
+  display: none;
+}
+
+.admin-panel--tabs-ready .admin-card-panel.is-active {
+  display: block;
 }
 
 .admin-quick-actions form,
@@ -57,8 +106,173 @@
   gap: 14px;
 }
 
+.editorial-team {
+  display: grid;
+  gap: 18px;
+}
+
+.editorial-team__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.editorial-team__summary article,
+.editorial-team__help,
+.editorial-user-create,
+.service-role-warning,
+.editorial-user-card {
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 22px;
+}
+
+.editorial-team__summary article {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+}
+
+.editorial-team__summary span,
+.editorial-team__summary small,
+.editorial-user-card__header span {
+  color: var(--muted);
+  font-family: var(--font-meta);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.editorial-team__summary strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.editorial-team__help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+}
+
+.editorial-team__help form {
+  margin: 0;
+}
+
+.editorial-team__help h3,
+.editorial-user-create h3,
+.editorial-user-card__header h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: clamp(1.35rem, 2.5vw, 1.9rem);
+  line-height: 1.1;
+}
+
+.editorial-user-create {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.service-role-warning {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, rgba(191, 111, 47, 0.14), transparent 48%),
+    var(--surface-strong);
+}
+
+.service-role-warning strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 1.18rem;
+}
+
+.service-role-warning p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.service-role-warning code {
+  margin-inline: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-size: 0.82em;
+}
+
+.editorial-user-card {
+  padding: 18px;
+}
+
+.editorial-user-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
 @media (max-width: 900px) {
   .story-admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-shell {
+    display: block;
+  }
+
+  .admin-hero,
+  .dashboard-header {
+    width: 100%;
+  }
+
+  .editorial-team__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .editorial-team__help,
+  .editorial-user-card__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-tabs {
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+  }
+
+  .admin-tab {
+    flex: 0 1 auto;
+  }
+
+  .story-row__actions,
+  .admin-quick-actions,
+  .dashboard-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .story-row__actions form,
+  .story-row__actions .button,
+  .story-row__actions button,
+  .admin-quick-actions form,
+  .admin-quick-actions .button,
+  .dashboard-actions .button {
+    width: 100%;
   }
 }
