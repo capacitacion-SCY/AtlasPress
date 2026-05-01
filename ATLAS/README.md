@@ -26,16 +26,18 @@ http://localhost:3000
 http://localhost:3000/admin
 ```
 
-No usar Live Server ni abrir archivos HTML directamente. El sitio real corre con Next.js y se ve desde el servidor local o desde Vercel.
+No usar Live Server ni abrir archivos HTML directamente. El sitio real corre con Next.js y se ve desde el servidor local o desde el hosting Node.js.
 
-## Publicacion
+## Publicacion (Hostinger)
 
-La publicacion recomendada es Vercel.
+Publicar como app Node.js (no sitio estatico).
 
-Si el repositorio contiene este proyecto dentro de una carpeta `Atlas`, configurar en Vercel:
+Build y arranque:
 
-```text
-Root Directory: Atlas
+```bash
+npm install
+npm run build
+npm run start -- --port 3000
 ```
 
 Variables necesarias:
@@ -46,10 +48,10 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY
 ```
 
-No subir `.env.local`, `.next`, `.vercel` ni `node_modules`.
+No subir `.env.local`, `.next` ni `node_modules`.
 
 ## Documentacion util
 
-- `README-VERCEL.md`: pasos de deploy.
+- `README-HOSTINGER.md`: pasos de deploy en Hostinger.
 - `README-PRODUCTIVO.md`: configuracion productiva.
 - `supabase/README.md`: orden recomendado para preparar Supabase.

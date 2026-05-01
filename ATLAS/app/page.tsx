@@ -1,6 +1,31 @@
-import { CompactAdCard, CompactStoryCard, FeatureStoryCard, BriefStoryCard } from "@/components/StoryCards";
+import { FeatureStoryCard } from "@/components/StoryCards";
+import { HomepageAutoColumns } from "@/components/HomepageAutoColumns";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getActiveAds, getCategories, getImpactCards, getPublishedStories, getSiteSettings } from "@/lib/content";
+import type { Story } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
+
+function homepageStoryOrder(story: Story) {
+  return typeof story.featured_order === "number" && Number.isFinite(story.featured_order) && story.featured_order > 0
+    ? story.featured_order
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function sortStoriesForHomepage(stories: Story[]) {
+  return [...stories].sort((a, b) =>
+    homepageStoryOrder(a) - homepageStoryOrder(b) ||
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime() ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function storyHomepagePosition(story: Story) {
+  if (story.featured) return "center";
+  if (story.featured_text_position === "left") return "left";
+  if (story.featured_text_position === "right") return "right";
+  return "auto";
+}
 
 export default async function HomePage({
   searchParams
@@ -8,86 +33,91 @@ export default async function HomePage({
   searchParams: Promise<{ category?: string }>;
 }) {
   const params = await searchParams;
-  const [settings, categories, stories, ads, impactCards] = await Promise.all([
+  const categories = await getCategories();
+  const rawCategory = (params.category ?? "").trim();
+  const selectedCategory = rawCategory ? categories.find((category) => category.slug === rawCategory) : null;
+  const isFiltered = Boolean(selectedCategory);
+  const [settings, stories, ads, impactCards] = await Promise.all([
     getSiteSettings(),
-    getCategories(),
-    getPublishedStories(params.category),
+    getPublishedStories(selectedCategory?.slug),
     getActiveAds(),
     getImpactCards()
   ]);
-
-  const isFiltered = Boolean(params.category);
-  const selectedCategory = params.category ? categories.find((category) => category.slug === params.category) : null;
-  const featuredStories = stories
-    .filter((story) => story.featured)
-    .sort((a, b) => (a.featured_order ?? 999) - (b.featured_order ?? 999));
-  const mainStories = isFiltered ? stories : featuredStories.length ? featuredStories : stories.slice(0, 4);
+  const featuredStories = sortStoriesForHomepage(stories.filter((story) => storyHomepagePosition(story) === "center"));
+  const centerFallbackStories = sortStoriesForHomepage(
+    stories.filter((story) => {
+      const position = storyHomepagePosition(story);
+      return position === "center" || position === "auto";
+    })
+  ).slice(0, 4);
+  const emergencyCenterStories = sortStoriesForHomepage(stories).slice(0, 4);
+  const mainStories = isFiltered
+    ? stories
+    : featuredStories.length > 0
+      ? featuredStories
+      : centerFallbackStories.length > 0
+        ? centerFallbackStories
+        : emergencyCenterStories;
   const remainingStories = stories.filter((story) => !mainStories.some((item) => item.id === story.id));
-  const explicitLeftStories = remainingStories.filter((story) => story.featured_text_position === "left");
-  const explicitRightStories = remainingStories.filter((story) => story.featured_text_position === "right");
-  const automaticStories = remainingStories.filter((story) => story.featured_text_position !== "left" && story.featured_text_position !== "right");
-  const leftStories = [...explicitLeftStories, ...automaticStories.filter((_, index) => index % 2 === 0)];
-  const rightStories = [...explicitRightStories, ...automaticStories.filter((_, index) => index % 2 === 1)];
+  const explicitLeftStories = sortStoriesForHomepage(remainingStories.filter((story) => storyHomepagePosition(story) === "left"));
+  const explicitRightStories = sortStoriesForHomepage(remainingStories.filter((story) => storyHomepagePosition(story) === "right"));
+  const automaticStories = sortStoriesForHomepage(remainingStories.filter((story) => storyHomepagePosition(story) === "auto"));
 
   return (
     <div className="site-shell">
-      <SiteHeader settings={settings} categories={categories} selectedCategorySlug={params.category ?? ""} />
+      <SiteHeader settings={settings} categories={categories} selectedCategorySlug={selectedCategory?.slug ?? ""} />
       {selectedCategory && (
         <section className="category-heading">
-          <p className="eyebrow">Categoría</p>
+          <p className="eyebrow">Categoria</p>
           <h1>{selectedCategory.name}</h1>
           <p>Publicaciones disponibles sobre {selectedCategory.name}.</p>
         </section>
       )}
       <main className="layout">
         <section className={`newsroom-grid ${isFiltered ? "newsroom-grid--filtered" : ""}`}>
-          {!isFiltered && leftStories.length > 0 && (
-            <aside className="news-column news-column--left">
-              {!params.category && (
-                <div className="section-heading section-heading--compact">
-                  <div>
-                    <p className="eyebrow">Cobertura breve</p>
-                    <h2>Últimas noticias</h2>
+          {!isFiltered && (
+            <HomepageAutoColumns
+              explicitLeftStories={explicitLeftStories}
+              explicitRightStories={explicitRightStories}
+              automaticStories={automaticStories}
+              ads={ads}
+              rotationSeconds={settings.auto_rotation_seconds}
+              rightImageRotationSeconds={settings.right_image_rotation_seconds}
+            >
+              {mainStories.length > 0 && (
+                <section className="news-column news-column--center">
+                  <div id="centerColumn">
+                    {mainStories.map((story, index) => (
+                      <FeatureStoryCard
+                        key={story.id}
+                        story={story}
+                        index={index}
+                        imageRotationSeconds={settings.center_image_rotation_seconds}
+                      />
+                    ))}
                   </div>
-                </div>
+                </section>
               )}
-              <div id="leftColumn">{leftStories.map((story) => <BriefStoryCard key={story.id} story={story} />)}</div>
-            </aside>
+            </HomepageAutoColumns>
           )}
 
-          {mainStories.length > 0 && (
+          {isFiltered && mainStories.length > 0 && (
             <section className="news-column news-column--center">
-              {!params.category && (
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Destacadas</p>
-                    <h2>Historias principales</h2>
-                  </div>
-                </div>
-              )}
-              <div id="centerColumn">{mainStories.map((story, index) => <FeatureStoryCard key={story.id} story={story} index={index} />)}</div>
-            </section>
-          )}
-
-          {!isFiltered && (rightStories.length > 0 || ads.length > 0) && (
-            <aside className="news-column news-column--right">
-              {!params.category && (
-                <div className="section-heading section-heading--compact">
-                  <div>
-                    <p className="eyebrow">Agenda y publicidad</p>
-                    <h2>Más para leer</h2>
-                  </div>
-                </div>
-              )}
-              <div id="rightColumn">
-                {rightStories.map((story) => <CompactStoryCard key={story.id} story={story} />)}
-                {ads.map((ad) => <CompactAdCard key={ad.id} ad={ad} />)}
+              <div id="centerColumn">
+                {mainStories.map((story, index) => (
+                  <FeatureStoryCard
+                    key={story.id}
+                    story={story}
+                    index={index}
+                    imageRotationSeconds={settings.center_image_rotation_seconds}
+                  />
+                ))}
               </div>
-            </aside>
+            </section>
           )}
         </section>
 
-        {stories.length === 0 && <div className="empty-state category-filter-empty">No hay notas publicadas en esta categoría por el momento.</div>}
+        {stories.length === 0 && <div className="empty-state category-filter-empty">No hay notas publicadas en esta categoria por el momento.</div>}
       </main>
 
       <section

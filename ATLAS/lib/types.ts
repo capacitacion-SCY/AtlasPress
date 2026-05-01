@@ -13,6 +13,7 @@ export type Story = {
   content: string;
   image_url: string;
   video_url: string;
+  gallery_videos?: string[];
   featured: boolean;
   editors_pick: boolean;
   featured_order: number | null;
@@ -34,6 +35,8 @@ export type Ad = {
   image_url: string;
   url: string;
   active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SiteSettings = {
@@ -41,6 +44,9 @@ export type SiteSettings = {
   site_name: string;
   tagline: string;
   impact_background_image: string;
+  auto_rotation_seconds?: number;
+  center_image_rotation_seconds?: number;
+  right_image_rotation_seconds?: number;
 };
 
 export type ImpactCard = {

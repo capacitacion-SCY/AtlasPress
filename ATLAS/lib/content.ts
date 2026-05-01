@@ -1,18 +1,42 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSupabaseEnv } from "@/lib/supabase/env";
+import { normalizeStoriesGallery, normalizeStoryGallery } from "@/lib/story-gallery";
 import type { Ad, Category, ImpactCard, SiteSettings, Story } from "@/lib/types";
 
 const fallbackSettings = {
   id: "fallback",
   site_name: "Atlas Press Argentina",
   tagline: "Buenas noticias, campañas humanitarias y encuentros interreligiosos con foco en Scientology Argentina.",
-  impact_background_image: ""
+  impact_background_image: "",
+  auto_rotation_seconds: 45,
+  center_image_rotation_seconds: 5,
+  right_image_rotation_seconds: 5
 };
+
+function numberSetting(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.floor(numeric)));
+}
+
+function normalizeSiteSettings(data: SiteSettings | null): SiteSettings {
+  const settings = data ?? fallbackSettings;
+
+  return {
+    ...settings,
+    auto_rotation_seconds: numberSetting(settings.auto_rotation_seconds, fallbackSettings.auto_rotation_seconds, 10, 3600),
+    center_image_rotation_seconds: numberSetting(settings.center_image_rotation_seconds, fallbackSettings.center_image_rotation_seconds, 2, 120),
+    right_image_rotation_seconds: numberSetting(settings.right_image_rotation_seconds, fallbackSettings.right_image_rotation_seconds, 2, 120)
+  };
+}
 
 export async function getSiteSettings() {
   if (!getSupabaseEnv()) {
-    return fallbackSettings;
+    return normalizeSiteSettings(null);
   }
 
   const supabase = await createClient();
@@ -22,7 +46,7 @@ export async function getSiteSettings() {
     .limit(1)
     .maybeSingle<SiteSettings>();
 
-  return data ?? fallbackSettings;
+  return normalizeSiteSettings(data);
 }
 
 export async function getCategories() {
@@ -57,7 +81,7 @@ export async function getPublishedStories(categorySlug?: string) {
   }
 
   const { data } = await query.returns<Story[]>();
-  return data ?? [];
+  return normalizeStoriesGallery(data ?? []);
 }
 
 export async function getAllStories() {
@@ -72,7 +96,7 @@ export async function getAllStories() {
     .order("published_at", { ascending: false })
     .returns<Story[]>();
 
-  return data ?? [];
+  return normalizeStoriesGallery(data ?? []);
 }
 
 export async function getStoryBySlug(slug: string) {
@@ -89,7 +113,7 @@ export async function getStoryBySlug(slug: string) {
     .maybeSingle<Story>();
 
   if (!data) notFound();
-  return data;
+  return normalizeStoryGallery(data);
 }
 
 export async function getActiveAds() {

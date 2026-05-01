@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "local": "powershell -ExecutionPolicy Bypass -File .\\scripts\\local-start.ps1",
+    "local:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\local-stop.ps1",
+    "local:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\local-status.ps1",
+    "local:reset": "powershell -ExecutionPolicy Bypass -File .\\scripts\\local-reset.ps1",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

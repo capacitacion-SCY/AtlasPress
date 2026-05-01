@@ -13,7 +13,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
 ```
 
-Para crear usuarios, sincronizar el equipo editorial y cambiar contraseñas desde Atlas, configurar tambien esta variable solo en el servidor/Vercel:
+Para crear usuarios, sincronizar el equipo editorial y cambiar contraseñas desde Atlas, configurar tambien esta variable solo en el servidor/hosting:
 
 ```bash
 SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { slugify } from "@/lib/format";
+import { embedMediaInContent } from "@/lib/story-gallery";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
@@ -167,8 +168,8 @@ function validStoryStatus(status: string) {
   return ["draft", "published", "archived"].includes(status) ? status : "draft";
 }
 
-function validTextPosition(position: string) {
-  return ["auto", "left", "right"].includes(position) ? position : "auto";
+function validTextPosition(position: string): "auto" | "left" | "right" {
+  return position === "left" || position === "right" || position === "auto" ? position : "auto";
 }
 
 function homepagePosition(formData: FormData) {
@@ -184,27 +185,133 @@ function homepagePosition(formData: FormData) {
   return checkbox(formData, "featured") ? "center" : "auto";
 }
 
-function placementPayload(formData: FormData, featuredTextPosition = "auto") {
-  const position = homepagePosition(formData);
+type HomepagePosition = "center" | "left" | "right" | "auto";
 
+function normalizedHomepagePosition(formData: FormData): HomepagePosition {
+  const position = homepagePosition(formData);
+  return position === "center" || position === "left" || position === "right" || position === "auto"
+    ? position
+    : "auto";
+}
+
+function placementFromHomepagePosition(position: HomepagePosition) {
   if (position === "center") {
     return {
       featured: true,
-      featured_text_position: validTextPosition(featuredTextPosition)
+      featured_text_position: "auto" as const
+    };
+  }
+
+  if (position === "left" || position === "right") {
+    return {
+      featured: false,
+      featured_text_position: position
     };
   }
 
   return {
     featured: false,
-    featured_text_position: position === "left" || position === "right" ? position : "auto"
+    featured_text_position: "auto" as const
   };
 }
 
-function isMissingGalleryColumn(error: { code?: string; message?: string } | null) {
-  return Boolean(
-    error &&
-      error.code === "PGRST204" &&
-      error.message?.includes("gallery_images")
+function placementPayload(formData: FormData, featuredTextPosition = "auto") {
+  const _ = featuredTextPosition;
+  return placementFromHomepagePosition(normalizedHomepagePosition(formData));
+}
+
+type StoryPlacementRecord = {
+  id: string;
+  featured: boolean;
+  featured_order: number | null;
+  featured_text_position: "auto" | "left" | "right";
+  published_at: string;
+};
+
+type AdPlacementRecord = {
+  id: string;
+  created_at: string;
+};
+
+function storyPlacementGroup(story: Pick<StoryPlacementRecord, "featured" | "featured_text_position">) {
+  if (story.featured) return "center";
+  if (story.featured_text_position === "left") return "left";
+  if (story.featured_text_position === "right") return "right";
+  return "auto";
+}
+
+function storyOrderValue(story: Pick<StoryPlacementRecord, "featured_order">) {
+  return typeof story.featured_order === "number" && Number.isFinite(story.featured_order) && story.featured_order > 0
+    ? story.featured_order
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function sortStoriesForPlacement<T extends StoryPlacementRecord>(stories: T[]) {
+  return [...stories].sort((a, b) =>
+    storyOrderValue(a) - storyOrderValue(b) ||
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime() ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function sortAdsForPlacement<T extends AdPlacementRecord>(ads: T[]) {
+  return [...ads].sort((a, b) =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function moveIndex(currentIndex: number, length: number, action: string) {
+  if (action === "first") return 0;
+  if (action === "last") return length;
+  if (action === "up") return Math.max(0, currentIndex - 1);
+  if (action === "down") return Math.min(length, currentIndex + 1);
+  return Math.max(0, Math.min(currentIndex, length));
+}
+
+function targetPositionIndex(position: string, length: number) {
+  const numericPosition = Number(position);
+
+  if (!Number.isFinite(numericPosition) || numericPosition < 1) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(Math.floor(numericPosition) - 1, length));
+}
+
+async function resequenceStories(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  stories: StoryPlacementRecord[]
+) {
+  await Promise.all(
+    stories.map((story, index) =>
+      supabase
+        .from("stories")
+        .update({
+          featured: story.featured,
+          featured_text_position: validTextPosition(story.featured_text_position),
+          featured_order: index + 1
+        })
+        .eq("id", story.id)
+    )
+  );
+}
+
+async function resequenceAds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ads: AdPlacementRecord[]
+) {
+  const baseTime = Date.now() + ads.length * 60_000;
+
+  await Promise.all(
+    ads.map((ad, index) =>
+      supabase
+        .from("ads")
+        .update({
+          created_at: new Date(baseTime - index * 60_000).toISOString()
+        })
+        .eq("id", ad.id)
+    )
   );
 }
 
@@ -212,12 +319,30 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function withoutGalleryImages<T extends StoryPayloadInput>(payload: T): T {
-  if (Array.isArray(payload)) {
-    return payload.map(({ gallery_images: _galleryImages, ...story }) => story) as T;
+function isMissingColumn(error: { code?: string; message?: string } | null, column: string) {
+  return Boolean(error && error.code === "PGRST204" && error.message?.includes(column));
+}
+
+function payloadWithEmbeddedMedia(story: StoryPayload) {
+  if (typeof story.content !== "string") {
+    return story;
   }
 
-  const { gallery_images: _galleryImages, ...story } = payload;
+  return {
+    ...story,
+    content: embedMediaInContent(story.content, story.gallery_images, story.gallery_videos)
+  };
+}
+
+function withoutGalleryMedia<T extends StoryPayloadInput>(payload: T): T {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => {
+      const { gallery_images: _galleryImages, gallery_videos: _galleryVideos, ...story } = payloadWithEmbeddedMedia(item);
+      return story;
+    }) as T;
+  }
+
+  const { gallery_images: _galleryImages, gallery_videos: _galleryVideos, ...story } = payloadWithEmbeddedMedia(payload);
   return story as T;
 }
 
@@ -227,15 +352,8 @@ async function mutateStoryWithGalleryFallback<T extends StoryPayloadInput>(
 ) {
   const result = await mutate(payload);
 
-  if (isMissingGalleryColumn(result.error)) {
-    const payloads = Array.isArray(payload) ? payload : [payload];
-    const hasGalleryImages = payloads.some((story) => Array.isArray(story.gallery_images) && story.gallery_images.length > 0);
-
-    if (hasGalleryImages) {
-      redirect("/admin?error=galeria-pendiente#nueva-nota");
-    }
-
-    return mutate(withoutGalleryImages(payload));
+  if (isMissingColumn(result.error, "gallery_images") || isMissingColumn(result.error, "gallery_videos")) {
+    return mutate(withoutGalleryMedia(payload));
   }
 
   return result;
@@ -256,6 +374,7 @@ export async function createStory(formData: FormData) {
   const imageUrl = await uploadImageFromForm(supabase, formData, "image_file", "stories", value(formData, "image_url"));
   const uploadedGalleryImages = await uploadImagesFromForm(supabase, formData, "gallery_files", "stories/gallery");
   const galleryImages = uniqueImageList([...parseImageList(value(formData, "gallery_image_urls")), ...uploadedGalleryImages]);
+  const galleryVideos = uniqueImageList(parseImageList(value(formData, "gallery_video_urls")));
 
   const storyPayload = {
     title,
@@ -268,6 +387,7 @@ export async function createStory(formData: FormData) {
     image_url: imageUrl,
     gallery_images: galleryImages,
     video_url: value(formData, "video_url"),
+    gallery_videos: galleryVideos,
     ...placementPayload(formData, value(formData, "featured_text_position")),
     editors_pick: checkbox(formData, "editors_pick"),
     source_label: value(formData, "source_label"),
@@ -312,10 +432,10 @@ export async function updateStory(formData: FormData) {
 
   const slug = await uniqueStorySlugForUpdate(slugify(value(formData, "slug") || title), id);
   const publishedAt = value(formData, "published_at");
-  const featuredOrder = value(formData, "featured_order");
   const imageUrl = await uploadImageFromForm(supabase, formData, "image_file", "stories", value(formData, "image_url"));
   const uploadedGalleryImages = await uploadImagesFromForm(supabase, formData, "gallery_files", "stories/gallery");
   const galleryImages = uniqueImageList([...parseImageList(value(formData, "gallery_images")), ...uploadedGalleryImages]);
+  const galleryVideos = uniqueImageList(parseImageList(value(formData, "gallery_videos")));
   const storyPayload = {
     title,
     slug,
@@ -325,12 +445,12 @@ export async function updateStory(formData: FormData) {
     image_url: imageUrl,
     gallery_images: galleryImages,
     video_url: value(formData, "video_url"),
-    ...placementPayload(formData, value(formData, "featured_text_position")),
+    gallery_videos: galleryVideos,
     editors_pick: checkbox(formData, "editors_pick"),
-    featured_order: featuredOrder ? Number(featuredOrder) : null,
     source_label: value(formData, "source_label"),
     source_url: value(formData, "source_url"),
     status: validStoryStatus(value(formData, "status")),
+    ...placementPayload(formData, value(formData, "featured_text_position")),
     published_at: publishedAt ? new Date(publishedAt).toISOString() : new Date().toISOString()
   };
 
@@ -349,18 +469,69 @@ export async function updateStory(formData: FormData) {
 export async function updateStoryPlacement(formData: FormData) {
   const { supabase } = await requirePermission("stories");
   const id = value(formData, "id");
+  const positionAction = value(formData, "position_action") || "apply";
+  const requestedPosition = value(formData, "target_position");
 
   if (!id) {
     redirect("/admin?error=editar-nota#notas-publicadas");
   }
 
-  const { error } = await supabase
-    .from("stories")
-    .update(placementPayload(formData, value(formData, "featured_text_position")))
-    .eq("id", id);
+  const [{ data: currentStory, error: currentError }, { data: allStories, error: allError }] = await Promise.all([
+    supabase
+      .from("stories")
+      .select("id, featured, featured_order, featured_text_position, published_at")
+      .eq("id", id)
+      .maybeSingle<StoryPlacementRecord>(),
+    supabase
+      .from("stories")
+      .select("id, featured, featured_order, featured_text_position, published_at")
+      .returns<StoryPlacementRecord[]>()
+  ]);
 
-  if (error) {
+  if (currentError || allError || !currentStory || !allStories) {
     redirect("/admin?error=editar-nota#notas-publicadas");
+  }
+
+  const nextPlacement = placementFromHomepagePosition(normalizedHomepagePosition(formData));
+  const currentGroup = storyPlacementGroup(currentStory);
+  const targetStory: StoryPlacementRecord = {
+    ...currentStory,
+    featured: Boolean(nextPlacement.featured),
+    featured_text_position: validTextPosition(String(nextPlacement.featured_text_position || "auto"))
+  };
+  const targetGroup = storyPlacementGroup(targetStory);
+
+  if (currentGroup === targetGroup) {
+    const orderedStories = sortStoriesForPlacement(
+      allStories.filter((story) => storyPlacementGroup(story) === currentGroup)
+    );
+    const currentIndex = orderedStories.findIndex((story) => story.id === currentStory.id);
+
+    if (currentIndex < 0) {
+      redirect("/admin?error=editar-nota#notas-publicadas");
+    }
+
+    orderedStories.splice(currentIndex, 1);
+    const targetIndex =
+      targetPositionIndex(requestedPosition, orderedStories.length) ??
+      moveIndex(currentIndex, orderedStories.length, positionAction);
+
+    orderedStories.splice(targetIndex, 0, targetStory);
+    await resequenceStories(supabase, orderedStories);
+  } else {
+    const destinationStories = sortStoriesForPlacement(
+      allStories.filter((story) => story.id !== currentStory.id && storyPlacementGroup(story) === targetGroup)
+    );
+    const sourceStories = sortStoriesForPlacement(
+      allStories.filter((story) => story.id !== currentStory.id && storyPlacementGroup(story) === currentGroup)
+    );
+
+    destinationStories.unshift(targetStory);
+
+    await Promise.all([
+      resequenceStories(supabase, destinationStories),
+      resequenceStories(supabase, sourceStories)
+    ]);
   }
 
   revalidatePath("/");
@@ -394,6 +565,7 @@ export async function duplicateStory(formData: FormData) {
     image_url: story.image_url ?? "",
     gallery_images: Array.isArray(story.gallery_images) ? story.gallery_images : [],
     video_url: story.video_url ?? "",
+    gallery_videos: Array.isArray(story.gallery_videos) ? story.gallery_videos : [],
     featured: Boolean(story.featured),
     editors_pick: Boolean(story.editors_pick),
     featured_order: story.featured_order ?? null,
@@ -418,18 +590,45 @@ export async function duplicateStory(formData: FormData) {
 export async function updateSettings(formData: FormData) {
   const { supabase } = await requirePermission("settings");
   const id = value(formData, "id");
+  const rawRotation = Number(value(formData, "auto_rotation_seconds") || 45);
+  const autoRotationSeconds = Number.isFinite(rawRotation) ? Math.max(10, Math.min(3600, Math.floor(rawRotation))) : 45;
+  const rawCenterImageRotation = Number(value(formData, "center_image_rotation_seconds") || 5);
+  const centerImageRotationSeconds = Number.isFinite(rawCenterImageRotation)
+    ? Math.max(2, Math.min(120, Math.floor(rawCenterImageRotation)))
+    : 5;
+  const rawRightImageRotation = Number(value(formData, "right_image_rotation_seconds") || 5);
+  const rightImageRotationSeconds = Number.isFinite(rawRightImageRotation)
+    ? Math.max(2, Math.min(120, Math.floor(rawRightImageRotation)))
+    : 5;
 
   const payload = {
     site_name: value(formData, "site_name"),
     tagline: value(formData, "tagline"),
-    impact_background_image: value(formData, "impact_background_image")
+    impact_background_image: value(formData, "impact_background_image"),
+    auto_rotation_seconds: autoRotationSeconds,
+    center_image_rotation_seconds: centerImageRotationSeconds,
+    right_image_rotation_seconds: rightImageRotationSeconds
+  };
+  const fallbackPayload = {
+    site_name: payload.site_name,
+    tagline: payload.tagline,
+    impact_background_image: payload.impact_background_image
   };
 
-  const query = id
-    ? supabase.from("site_settings").update(payload).eq("id", id)
-    : supabase.from("site_settings").insert(payload);
+  const runMutation = (data: typeof payload | typeof fallbackPayload) =>
+    id ? supabase.from("site_settings").update(data).eq("id", id) : supabase.from("site_settings").insert(data);
 
-  await query;
+  const result = await runMutation(payload);
+  if (
+    isMissingColumn(result.error, "auto_rotation_seconds") ||
+    isMissingColumn(result.error, "center_image_rotation_seconds") ||
+    isMissingColumn(result.error, "right_image_rotation_seconds")
+  ) {
+    redirect("/admin?error=temporizadores-schema#ajustes-rapidos");
+  } else if (result.error) {
+    redirect("/admin?error=ajustes#ajustes-rapidos");
+  }
+
   revalidatePath("/");
   revalidatePath("/admin");
   redirect("/admin?ok=ajustes#ajustes-rapidos");
@@ -487,6 +686,40 @@ export async function updateAd(formData: FormData) {
   if (error) {
     redirect("/admin?error=editar-publicidad#publicidad-activa");
   }
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+  redirect("/admin?ok=publicidad-editada#publicidad-activa");
+}
+
+export async function updateAdPosition(formData: FormData) {
+  const { supabase } = await requirePermission("ads");
+  const id = value(formData, "id");
+  const positionAction = value(formData, "position_action") || "up";
+  const requestedPosition = value(formData, "target_position");
+
+  if (!id) {
+    redirect("/admin?error=editar-publicidad#publicidad-activa");
+  }
+
+  const { data: ads, error } = await supabase.from("ads").select("id, created_at").returns<AdPlacementRecord[]>();
+
+  if (error || !ads) {
+    redirect("/admin?error=editar-publicidad#publicidad-activa");
+  }
+
+  const orderedAds = sortAdsForPlacement(ads);
+  const currentIndex = orderedAds.findIndex((ad) => ad.id === id);
+
+  if (currentIndex < 0) {
+    redirect("/admin?error=editar-publicidad#publicidad-activa");
+  }
+
+  const [selectedAd] = orderedAds.splice(currentIndex, 1);
+  const nextIndex = targetPositionIndex(requestedPosition, orderedAds.length) ?? moveIndex(currentIndex, orderedAds.length, positionAction);
+  orderedAds.splice(nextIndex, 0, selectedAd);
+
+  await resequenceAds(supabase, orderedAds);
 
   revalidatePath("/");
   revalidatePath("/admin");
@@ -773,6 +1006,9 @@ export async function importBackup(formData: FormData) {
             ? story.gallery_images.map((image) => String(image)).filter(Boolean)
             : parseImageList(String(story.gallery_images || story.images || "")),
           video_url: String(story.video_url || ""),
+          gallery_videos: Array.isArray(story.gallery_videos)
+            ? story.gallery_videos.map((video) => String(video)).filter(Boolean)
+            : parseImageList(String(story.gallery_videos || story.videos || "")),
           featured: Boolean(story.featured),
           editors_pick: Boolean(story.editors_pick),
           featured_order: story.featured_order === null || story.featured_order === undefined ? null : Number(story.featured_order),
@@ -835,13 +1071,32 @@ export async function importBackup(formData: FormData) {
     const payload = {
       site_name: String(firstSetting.site_name || "Atlas Press Argentina"),
       tagline: String(firstSetting.tagline || ""),
-      impact_background_image: String(firstSetting.impact_background_image || "")
+      impact_background_image: String(firstSetting.impact_background_image || ""),
+      auto_rotation_seconds: Number(firstSetting.auto_rotation_seconds ?? 45),
+      center_image_rotation_seconds: Number(firstSetting.center_image_rotation_seconds ?? 5),
+      right_image_rotation_seconds: Number(firstSetting.right_image_rotation_seconds ?? 5)
     };
-    const { error } = currentSettings?.id
-      ? await supabase.from("site_settings").update(payload).eq("id", currentSettings.id)
-      : await supabase.from("site_settings").insert(payload);
+    const fallbackPayload = {
+      site_name: payload.site_name,
+      tagline: payload.tagline,
+      impact_background_image: payload.impact_background_image
+    };
+    const runMutation = (data: typeof payload | typeof fallbackPayload) =>
+      currentSettings?.id
+        ? supabase.from("site_settings").update(data).eq("id", currentSettings.id)
+        : supabase.from("site_settings").insert(data);
+    const result = await runMutation(payload);
 
-    if (error) {
+    if (
+      isMissingColumn(result.error, "auto_rotation_seconds") ||
+      isMissingColumn(result.error, "center_image_rotation_seconds") ||
+      isMissingColumn(result.error, "right_image_rotation_seconds")
+    ) {
+      const fallbackResult = await runMutation(fallbackPayload);
+      if (fallbackResult.error) {
+        redirect("/admin?error=backup-ajustes#importar-exportar");
+      }
+    } else if (result.error) {
       redirect("/admin?error=backup-ajustes#importar-exportar");
     }
   }

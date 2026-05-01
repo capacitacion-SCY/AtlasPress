@@ -19,6 +19,9 @@ create table if not exists public.site_settings (
   site_name text not null default 'Atlas Press Argentina',
   tagline text not null default '',
   impact_background_image text not null default '',
+  auto_rotation_seconds integer not null default 45 check (auto_rotation_seconds between 10 and 3600),
+  center_image_rotation_seconds integer not null default 5 check (center_image_rotation_seconds between 2 and 120),
+  right_image_rotation_seconds integer not null default 5 check (right_image_rotation_seconds between 2 and 120),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -43,6 +46,7 @@ create table if not exists public.stories (
   image_url text not null default '',
   gallery_images text[] not null default array[]::text[],
   video_url text not null default '',
+  gallery_videos text[] not null default array[]::text[],
   featured boolean not null default false,
   editors_pick boolean not null default false,
   featured_order integer,
@@ -80,6 +84,7 @@ create table if not exists public.impact_cards (
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = now();
@@ -106,6 +111,10 @@ for each row execute function public.touch_updated_at();
 create trigger impact_cards_touch_updated_at
 before update on public.impact_cards
 for each row execute function public.touch_updated_at();
+
+create index if not exists stories_author_id_idx on public.stories(author_id);
+create index if not exists stories_category_id_idx on public.stories(category_id);
+create index if not exists stories_status_published_at_idx on public.stories(status, published_at desc);
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -214,26 +223,38 @@ on public.profiles for all
 using (public.has_permission('users'))
 with check (public.has_permission('users'));
 
-insert into public.site_settings (site_name, tagline)
-select 'Atlas Press Argentina', 'Buenas noticias, campañas humanitarias y encuentros interreligiosos con foco en Scientology Argentina.'
+insert into public.site_settings (
+  site_name,
+  tagline,
+  auto_rotation_seconds,
+  center_image_rotation_seconds,
+  right_image_rotation_seconds
+)
+select
+  'Atlas Press Argentina',
+  'Buenas noticias, campañas humanitarias y encuentros interreligiosos con foco en Scientology Argentina.',
+  45,
+  5,
+  5
 where not exists (select 1 from public.site_settings);
 
 insert into public.categories (name, slug, sort_order)
 values
-  ('Interreligioso', 'interreligioso', 10),
-  ('Comunidad', 'comunidad', 20),
-  ('Libertad Religiosa', 'libertad-religiosa', 30),
-  ('Historias', 'historias', 40),
-  ('Prevención', 'prevencion', 50),
-  ('Jóvenes por los Derechos Humanos', 'jovenes-por-los-derechos-humanos', 60),
-  ('Voces para la Humanidad', 'voces-para-la-humanidad', 70),
-  ('Mundo Libre de drogas', 'mundo-libre-de-drogas', 80),
-  ('Ministros Voluntarios', 'ministros-voluntarios', 90),
-  ('El Camino a la Felicidad', 'el-camino-a-la-felicidad', 100),
-  ('CCHR', 'cchr', 110),
-  ('Narconon', 'narconon', 120),
-  ('Unidos por los Derechos Humanos', 'unidos-por-los-derechos-humanos', 130),
-  ('Librería', 'libreria', 140)
+  ('Derechos Humanos', 'derechos-humanos', 10),
+  ('Religión', 'religion', 20),
+  ('Mundo', 'mundo', 30),
+  ('Salud', 'salud', 40),
+  ('Ministros Voluntarios', 'ministros-voluntarios', 50),
+  ('Ciencia y tecnología', 'ciencia-y-tecnologia', 60),
+  ('Medio Ambiente', 'medio-ambiente', 70),
+  ('Política', 'politica', 80),
+  ('Latinoamérica', 'latinoamerica', 90),
+  ('Economía', 'economia', 100),
+  ('IA al día', 'ia-al-dia', 110),
+  ('Librería', 'libreria', 120),
+  ('Comunidad', 'comunidad', 130),
+  ('Historias', 'historias', 140),
+  ('Prevención', 'prevencion', 150)
 on conflict (slug) do nothing;
 
 insert into public.impact_cards (label, title, body, sort_order)

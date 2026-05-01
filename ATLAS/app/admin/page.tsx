@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/login/actions";
+import { AdminGalleryManager } from "@/components/AdminGalleryManager";
 import { AdminTabsController } from "@/components/AdminTabsController";
 import { BackupFileInput } from "@/components/BackupFileInput";
 import {
@@ -14,6 +15,7 @@ import {
   importBackup,
   syncEditorialUsers,
   updateAd,
+  updateAdPosition,
   updateImpactCard,
   updateProfilePermissions,
   updateStoryPlacement,
@@ -22,10 +24,36 @@ import {
 } from "./actions";
 import { getAllAds, getAllStories, getCategories, getImpactCards, getSiteSettings } from "@/lib/content";
 import { formatDate } from "@/lib/format";
+import { getVideoThumbnailUrl } from "@/lib/media";
 import { hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { Ad, Profile, Story } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
+
+type StoryPlacement = "center" | "left" | "right" | "auto";
+
+function homepageStoryOrder(story: Story) {
+  return typeof story.featured_order === "number" && Number.isFinite(story.featured_order) && story.featured_order > 0
+    ? story.featured_order
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function sortStoriesForPlacement(stories: Story[]) {
+  return [...stories].sort((a, b) =>
+    homepageStoryOrder(a) - homepageStoryOrder(b) ||
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime() ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function sortAdsForPlacement(ads: Ad[]) {
+  return [...ads].sort((a, b) =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+    a.id.localeCompare(b.id)
+  );
+}
 
 const permissions = [
   { key: "stories", label: "Notas" },
@@ -54,7 +82,8 @@ const feedbackMessages: Record<string, string> = {
   "duplicar-nota": "No se pudo duplicar la nota.",
   "editar-publicidad": "No se pudo editar la publicidad.",
   "duplicar-publicidad": "No se pudo duplicar la publicidad.",
-  "borrar-publicidad": "No se pudo borrar la publicidad."
+  "borrar-publicidad": "No se pudo borrar la publicidad.",
+  "temporizadores-schema": "No se pudieron guardar los temporizadores. Ejecuta supabase/auto-rotation-settings.sql en Supabase y vuelve a intentar."
 };
 
 function can(profile: Profile, permission: string) {
@@ -71,11 +100,50 @@ function storyImageSet(story: Story) {
   return [story.image_url, ...(story.gallery_images ?? [])].filter(Boolean);
 }
 
+function storyAdminThumbnail(story: Story) {
+  const firstVideo = [story.video_url, ...(story.gallery_videos ?? [])].find(Boolean) || "";
+  const image = story.image_url || story.gallery_images?.[0] || getVideoThumbnailUrl(firstVideo);
+  return image ? { image, label: story.image_url ? "" : story.gallery_images?.[0] ? "Galeria" : "Video" } : null;
+}
+
 function storyHomepagePosition(story: Story) {
   if (story.featured) return "center";
   if (story.featured_text_position === "left") return "left";
   if (story.featured_text_position === "right") return "right";
   return "auto";
+}
+
+function buildStoryPositionMap(stories: Story[]) {
+  const map = new Map<string, { current: number; total: number; placement: StoryPlacement }>();
+  const placements: StoryPlacement[] = ["center", "left", "right", "auto"];
+
+  placements.forEach((placement) => {
+    const groupStories = sortStoriesForPlacement(stories.filter((story) => storyHomepagePosition(story) === placement));
+
+    groupStories.forEach((story, index) => {
+      map.set(story.id, {
+        current: index + 1,
+        total: groupStories.length,
+        placement
+      });
+    });
+  });
+
+  return map;
+}
+
+function buildAdPositionMap(ads: Ad[]) {
+  const map = new Map<string, { current: number; total: number }>();
+  const orderedAds = sortAdsForPlacement(ads);
+
+  orderedAds.forEach((ad, index) => {
+    map.set(ad.id, {
+      current: index + 1,
+      total: orderedAds.length
+    });
+  });
+
+  return map;
 }
 
 function storyHomepagePositionLabel(story: Story) {
@@ -86,47 +154,76 @@ function storyHomepagePositionLabel(story: Story) {
   return "Automatico";
 }
 
-function PlacementChoice({ value, label, current }: { value: string; label: string; current: string }) {
+function PlacementChoice({ value, label, current, formId }: { value: string; label: string; current: string; formId?: string }) {
   return (
     <label className="placement-choice">
-      <input type="radio" name="homepage_position" value={value} defaultChecked={current === value} />
+      <input type="radio" name="homepage_position" value={value} defaultChecked={current === value} form={formId} />
       <span>{label}</span>
     </label>
   );
 }
 
-function StoryRow({ story, categories, allowManage }: { story: Story; categories: Awaited<ReturnType<typeof getCategories>>; allowManage: boolean }) {
+function StoryRow({
+  story,
+  categories,
+  allowManage,
+  positionInfo
+}: {
+  story: Story;
+  categories: Awaited<ReturnType<typeof getCategories>>;
+  allowManage: boolean;
+  positionInfo?: { current: number; total: number; placement: StoryPlacement };
+}) {
   const publishedDate = story.published_at ? story.published_at.slice(0, 16) : "";
   const images = storyImageSet(story);
+  const thumbnail = storyAdminThumbnail(story);
+  const placementFormId = `story-placement-${story.id}`;
 
   return (
     <article className="story-row story-library-row">
       <div className="story-library-row__thumb">
-        {story.image_url ? <img src={story.image_url} alt="" /> : "Sin imagen"}
+        {thumbnail ? <img src={thumbnail.image} alt="" /> : "Sin imagen"}
+        {thumbnail?.label && <span className="story-library-row__media-badge">{thumbnail.label}</span>}
         {images.length > 1 && <span className="story-library-row__gallery-count">{images.length} fotos</span>}
       </div>
       <div className="story-library-row__content">
         <strong>{story.title}</strong>
         <p>{story.excerpt || story.content}</p>
-        <div className="story-library-row__meta">
-          <span>{story.categories?.name ?? "Sin categoría"}</span>
-          <span>{formatDate(story.published_at)}</span>
-          <span>{storyStatusLabel(story.status)}</span>
-          <span>{storyHomepagePositionLabel(story)}</span>
-        </div>
+      </div>
+      <div className="story-library-row__meta">
+        <span>{story.categories?.name ?? "Sin categoría"}</span>
+        <span>{formatDate(story.published_at)}</span>
+        <span>{storyStatusLabel(story.status)}</span>
+        <span>{storyHomepagePositionLabel(story)}</span>
       </div>
       {allowManage && (
-        <form action={updateStoryPlacement} className="story-placement-form" aria-label={`Ubicacion de ${story.title}`}>
-          <input type="hidden" name="id" value={story.id} />
-          <input type="hidden" name="featured_text_position" value={story.featured_text_position ?? "auto"} />
-          <div className="story-placement-form__choices">
-            <PlacementChoice value="left" label="Izquierda" current={storyHomepagePosition(story)} />
-            <PlacementChoice value="center" label="Central" current={storyHomepagePosition(story)} />
-            <PlacementChoice value="right" label="Derecha" current={storyHomepagePosition(story)} />
-            <PlacementChoice value="auto" label="Auto" current={storyHomepagePosition(story)} />
+        <div className="story-placement-form__control-stack">
+          <div className="story-placement-form__meta">
+            <span className="inline-badge inline-badge--forest">
+              Posicion {positionInfo?.current ?? 1} / {positionInfo?.total ?? 1}
+            </span>
           </div>
-          <button className="button button--ghost" type="submit">Aplicar</button>
-        </form>
+          <label className="position-number-control">
+            <span>Orden</span>
+            <input
+              type="number"
+              name="target_position"
+              min="1"
+              max={positionInfo?.total ?? 1}
+              defaultValue={positionInfo?.current ?? 1}
+              aria-label={`Posicion numerica de ${story.title}`}
+              form={placementFormId}
+            />
+          </label>
+        </div>
+      )}
+      {allowManage && (
+        <div className="story-placement-form__choice-stack" aria-label="Columna en portada">
+          <PlacementChoice value="auto" label="Automatico" current={storyHomepagePosition(story)} formId={placementFormId} />
+          <PlacementChoice value="center" label="Centro" current={storyHomepagePosition(story)} formId={placementFormId} />
+          <PlacementChoice value="left" label="Izquierda" current={storyHomepagePosition(story)} formId={placementFormId} />
+          <PlacementChoice value="right" label="Derecha" current={storyHomepagePosition(story)} formId={placementFormId} />
+        </div>
       )}
       <div className="story-row__actions">
         <Link className="button button--ghost" href={`/article/${story.slug}`}>
@@ -141,10 +238,19 @@ function StoryRow({ story, categories, allowManage }: { story: Story; categories
           </form>
         )}
         {allowManage && (
-          <form action={deleteStory}>
+          <form action={deleteStory} className="story-row__delete-action">
             <input type="hidden" name="id" value={story.id} />
             <button className="button" type="submit">
               Borrar
+            </button>
+          </form>
+        )}
+        {allowManage && (
+          <form id={placementFormId} action={updateStoryPlacement} className="story-row__apply-action" aria-label={`Aplicar ubicacion de ${story.title}`}>
+            <input type="hidden" name="id" value={story.id} />
+            <input type="hidden" name="featured_text_position" value={story.featured_text_position ?? "auto"} />
+            <button className="button story-placement-form__apply" type="submit" name="position_action" value="apply">
+              Aplicar
             </button>
           </form>
         )}
@@ -152,7 +258,7 @@ function StoryRow({ story, categories, allowManage }: { story: Story; categories
       {allowManage && (
         <details className="admin-edit-details">
           <summary>Editar publicación</summary>
-          <form action={updateStory} className="admin-edit-form">
+          <form id={`edit-story-${story.id}`} action={updateStory} className="admin-edit-form">
             <input type="hidden" name="id" value={story.id} />
             <div className="form-split">
               <label><span>Título</span><input name="title" defaultValue={story.title} required /></label>
@@ -183,18 +289,15 @@ function StoryRow({ story, categories, allowManage }: { story: Story; categories
               <label><span>URL de imagen</span><input name="image_url" defaultValue={story.image_url} placeholder="https://..." /></label>
               <label><span>Video</span><input name="video_url" defaultValue={story.video_url} placeholder="https://..." /></label>
             </div>
-            <div className="story-gallery-preview" aria-label="Imagenes cargadas en esta publicacion">
-              {images.length > 0 ? (
-                images.map((image, index) => (
-                  <figure key={`${story.id}-${image}-${index}`}>
-                    <img src={image} alt="" />
-                    <figcaption>{index === 0 ? "Principal" : `Galeria ${index}`}</figcaption>
-                  </figure>
-                ))
-              ) : (
-                <p>No hay imagenes cargadas.</p>
-              )}
-            </div>
+            <label>
+              <span>Galeria de videos</span>
+              <textarea
+                name="gallery_videos"
+                defaultValue={(story.gallery_videos ?? []).join("\n")}
+                placeholder="Una URL de video por linea. YouTube, Vimeo, Scientology TV o enlaces .m3u8."
+              />
+            </label>
+            <AdminGalleryManager storyId={story.id} mainImageUrl={story.image_url} galleryImages={story.gallery_images ?? []} />
             <div className="form-split form-split--media">
               <label className="image-upload-card">
                 <span className="image-upload-card__title">Cambiar imagen principal</span>
@@ -207,36 +310,15 @@ function StoryRow({ story, categories, allowManage }: { story: Story; categories
                 <input type="file" name="gallery_files" accept="image/*" multiple />
               </label>
             </div>
-            <label>
-              <span>Galeria de imagenes</span>
-              <textarea name="gallery_images" defaultValue={(story.gallery_images ?? []).join("\n")} placeholder="Una URL por linea. Borra una URL para quitarla de la rotacion." />
-            </label>
             <div className="form-split">
               <label><span>Fuente</span><input name="source_label" defaultValue={story.source_label} /></label>
               <label><span>URL de fuente</span><input name="source_url" defaultValue={story.source_url} placeholder="https://..." /></label>
             </div>
             <div className="form-split">
               <label><span>Fecha de publicación</span><input type="datetime-local" name="published_at" defaultValue={publishedDate} /></label>
-              <label><span>Orden destacada</span><input type="number" name="featured_order" defaultValue={story.featured_order ?? ""} /></label>
             </div>
-            <label>
-              <span>Posición de texto</span>
-              <select name="featured_text_position" defaultValue={story.featured_text_position ?? "auto"}>
-                <option value="auto">Automática</option>
-                <option value="left">Izquierda</option>
-                <option value="right">Derecha</option>
-              </select>
-            </label>
+
             <div className="form-split form-split--toggles">
-              <fieldset className="placement-fieldset">
-                <legend>Ubicacion en portada</legend>
-                <div className="story-placement-form__choices">
-                  <PlacementChoice value="left" label="Izquierda" current={storyHomepagePosition(story)} />
-                  <PlacementChoice value="center" label="Central" current={storyHomepagePosition(story)} />
-                  <PlacementChoice value="right" label="Derecha" current={storyHomepagePosition(story)} />
-                  <PlacementChoice value="auto" label="Auto" current={storyHomepagePosition(story)} />
-                </div>
-              </fieldset>
               <label className="checkbox"><input type="checkbox" name="editors_pick" defaultChecked={story.editors_pick} /><span>Selección editorial</span></label>
             </div>
             <button className="button button--primary" type="submit">Guardar cambios</button>
@@ -247,7 +329,7 @@ function StoryRow({ story, categories, allowManage }: { story: Story; categories
   );
 }
 
-function AdRow({ ad, allowManage }: { ad: Ad; allowManage: boolean }) {
+function AdRow({ ad, allowManage, positionInfo }: { ad: Ad; allowManage: boolean; positionInfo?: { current: number; total: number } }) {
   return (
     <article className="ad-admin-card">
       <div className="ad-admin-card__media">{ad.image_url ? <img src={ad.image_url} alt="" /> : "Publicidad"}</div>
@@ -265,6 +347,31 @@ function AdRow({ ad, allowManage }: { ad: Ad; allowManage: boolean }) {
         )}
         {allowManage && (
           <div className="ad-admin-card__actions">
+            <form action={updateAdPosition} className="story-placement-form story-placement-form--ads">
+              <input type="hidden" name="id" value={ad.id} />
+              <div className="story-placement-form__meta">
+                <span className="inline-badge inline-badge--forest">
+                  Posicion {positionInfo?.current ?? 1} / {positionInfo?.total ?? 1}
+                </span>
+              </div>
+              <label className="position-number-control">
+                <span>Orden</span>
+                <input
+                  type="number"
+                  name="target_position"
+                  min="1"
+                  max={positionInfo?.total ?? 1}
+                  defaultValue={positionInfo?.current ?? 1}
+                  aria-label={`Posicion numerica de ${ad.title}`}
+                />
+              </label>
+              <div className="story-placement-form__order">
+                <button className="button button--ghost button--icon" type="submit" name="position_action" value="up" aria-label="Subir una posicion">-</button>
+                <button className="button button--ghost button--icon" type="submit" name="position_action" value="down" aria-label="Bajar una posicion">+</button>
+                <button className="button button--ghost" type="submit" name="position_action" value="first">Primera</button>
+                <button className="button button--ghost" type="submit" name="position_action" value="last">Ultima</button>
+              </div>
+            </form>
             <form action={duplicateAd}>
               <input type="hidden" name="id" value={ad.id} />
               <button className="button button--ghost" type="submit">Duplicar publicidad</button>
@@ -336,6 +443,8 @@ export default async function AdminPage({
   const activeProfiles = profiles.filter((member) => member.active);
   const inactiveProfiles = profiles.length - activeProfiles.length;
   const canUseAdminUsers = hasSupabaseAdminEnv();
+  const storyPositionMap = buildStoryPositionMap(stories);
+  const adPositionMap = buildAdPositionMap(ads);
 
   return (
     <div className="admin-shell">
@@ -399,6 +508,39 @@ export default async function AdminPage({
               <label>
                 <span>Imagen de franja de impacto</span>
                 <input name="impact_background_image" defaultValue={settings.impact_background_image} placeholder="https://..." />
+              </label>
+              <label>
+                <span>Rotacion de notas automaticas (segundos)</span>
+                <input
+                  type="number"
+                  name="auto_rotation_seconds"
+                  min={10}
+                  max={3600}
+                  step={1}
+                  defaultValue={settings.auto_rotation_seconds ?? 45}
+                />
+              </label>
+              <label>
+                <span>Rotacion de imagenes en columna central (segundos)</span>
+                <input
+                  type="number"
+                  name="center_image_rotation_seconds"
+                  min={2}
+                  max={120}
+                  step={1}
+                  defaultValue={settings.center_image_rotation_seconds ?? 5}
+                />
+              </label>
+              <label>
+                <span>Rotacion de imagenes en columna derecha (segundos)</span>
+                <input
+                  type="number"
+                  name="right_image_rotation_seconds"
+                  min={2}
+                  max={120}
+                  step={1}
+                  defaultValue={settings.right_image_rotation_seconds ?? 5}
+                />
               </label>
               <button className="button button--primary" type="submit">Guardar ajustes</button>
             </form>
@@ -467,6 +609,10 @@ export default async function AdminPage({
                   <input name="video_url" placeholder="https://..." />
                 </label>
               </div>
+              <label>
+                <span>Galeria de videos</span>
+                <textarea name="gallery_video_urls" placeholder="Una URL de video por linea." />
+              </label>
               <div className="form-split form-split--media">
                 <label className="image-upload-card">
                   <span className="image-upload-card__title">Agregar galeria de imagenes</span>
@@ -562,7 +708,15 @@ export default async function AdminPage({
             <span className="inline-badge inline-badge--forest">{stories.length} notas</span>
           </div>
           <div className="stories-table">
-            {stories.map((story) => <StoryRow key={story.id} story={story} categories={categories} allowManage={can(profile, "stories")} />)}
+            {stories.map((story) => (
+              <StoryRow
+                key={story.id}
+                story={story}
+                categories={categories}
+                allowManage={can(profile, "stories")}
+                positionInfo={storyPositionMap.get(story.id)}
+              />
+            ))}
           </div>
         </section>
 
@@ -574,7 +728,7 @@ export default async function AdminPage({
             </div>
           </div>
           <div className="stories-table">
-            {ads.map((ad) => <AdRow key={ad.id} ad={ad} allowManage={can(profile, "ads")} />)}
+            {ads.map((ad) => <AdRow key={ad.id} ad={ad} allowManage={can(profile, "ads")} positionInfo={adPositionMap.get(ad.id)} />)}
           </div>
         </section>
 
@@ -649,7 +803,7 @@ export default async function AdminPage({
                   <strong>Falta activar la administracion completa.</strong>
                   <p>
                     Para crear usuarios, cambiar contrasenas y sincronizar la lista desde Atlas, agrega
-                    <code>SUPABASE_SERVICE_ROLE_KEY</code> en las variables de entorno de Vercel. No la subas a GitHub.
+                    <code>SUPABASE_SERVICE_ROLE_KEY</code> en las variables de entorno del hosting. No la subas a GitHub.
                   </p>
                   <a className="button button--ghost" href="https://supabase.com/dashboard/projects" target="_blank" rel="noreferrer">
                     Abrir Supabase Auth

@@ -21,7 +21,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
 ```
 
-Para administrar usuarios desde Atlas tambien hace falta configurar en Vercel, solo como variable de servidor:
+Para administrar usuarios desde Atlas tambien hace falta configurar en el hosting, solo como variable de servidor:
 
 ```bash
 SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_de_supabase
